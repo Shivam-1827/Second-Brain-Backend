@@ -1,0 +1,11 @@
+{
+  "name": "second-brain-backend",
+  "version": "1.0.0",
+  "description": "Get Ai assistance for your docs, articles etc",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Shivam Yadav",
+  "license": "ISC"
+}

@@ -1,9 +1,11 @@
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
+const otpGenerator = require("otp-generator")
 const databaseManager = require("../utils/database");
 const logger = require("../utils/logger");
 const AuthMiddleware = require("../middleware/auth");
 const ErrorHandlerMiddleware = require("../middleware/errorHandler");
+const { MessagePublisher } = require("../utils/rabbitmq");
 const { access } = require("fs");
 
 class AuthService {
@@ -410,6 +412,88 @@ class AuthService {
       logger.info("Password reset successfully for user:", { userId: user.id });
     } catch (error) {
       logger.error("Reset password failed:", error);
+      throw error;
+    }
+  }
+
+  async otpRequest(contactMethod, contact){
+    try {
+      const otp = otpGenerator.generate(6, {
+        digits: true,
+        lowerCaseAlphabets: false,
+        upperCaseAlphabets: false,
+        specialChars: false,
+      });
+  
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+      const user = await this.db.user.findUnique({
+        where: contactMethod === "email" ? {email: contact} : {phone: contact}
+      });
+
+      if (!user) {
+        throw new ErrorHandlerMiddleware.UnauthorizedError(
+          "user does not exists with this email or password"
+        );
+      }
+
+      await this.db.create({
+        data: {
+          userId: user.id,
+          otp,
+          type: "login",
+          contactMethod,
+          expiresAt
+        },
+      });
+
+      await MessagePublisher.publishOtpRequest(contactMethod, contact, otp);
+
+      logger.info("Otp request published successfully");
+
+    } catch (error) {
+      logger.error("OTP generation is failed: ", error);
+      throw error;
+    }
+  }
+
+  async otpVerify(contactMethod, contact, otp){
+    try {
+      const user = await this.db.user.findUnique({
+        where: contactMethod === "email" ? {email: contact} : {phone: contact},
+      });
+      
+      if (!user) {
+        throw new ErrorHandlerMiddleware.UnauthorizedError(
+          "user does not exists with this email or password"
+        );
+      }
+
+      const otpRecord = await this.db.findFirst({
+        where: {
+          userId: user.id,
+          otp,
+          contactMethod,
+          isUsed: false,
+          expiresAt: {gt: new Date()},
+        },
+      });
+
+      if(!otpRecord){
+        throw new ErrorHandlerMiddleware.UnauthorizedError(
+          "Invalid or expired OTP"
+        );
+      }
+
+      await this.db.update({
+        where: {id: otpRecord.id},
+        data: {isUsed: true},
+      });
+
+      logger.info("Authentication successful! OTP verified successfully")
+
+    } catch (error) {
+      logger.error("OTP verification failed: ", error);
       throw error;
     }
   }

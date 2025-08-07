@@ -1,6 +1,9 @@
 const amqp = require("amqplib");
 const logger = require("../utils/logger");
+const nodeMailer = require("nodemailer");
+const twilio = require("twilio");
 const { tr } = require("zod/locales");
+const { duration } = require("moment/moment");
 
 let connection;
 let channel;
@@ -12,6 +15,7 @@ const QUEUES = {
   EMBEDDING_GENERATION: "embedding_generation_queue",
   DOCUMENT_ANALYSIS: "document_analysis_queue",
   NOTIFICATIONS: "notifications_queue",
+  OTP_REQUESTS: "otp_requests_queue",
   DEAD_LETTER: "dead_letter_queue",
 };
 
@@ -19,7 +23,10 @@ const QUEUES = {
 const EXCHANGES = {
   PROCESSING: "processing_exchange",
   NOTIFICATIONS: "notifications_exchange",
+  // OTP: "otp_exchange",
 };
+
+
 
 // Connect RABBITMQ
 async function connectRabbitMQ() {
@@ -44,6 +51,7 @@ async function connectRabbitMQ() {
     await channel.assertExchange(EXCHANGES.NOTIFICATIONS, "fanout", {
       durable: true,
     });
+    // await channel.assertExchange(EXCHANGES.OTP, "direct", {durable: true});
 
     // setting up queues
     await setupQueues();
@@ -96,6 +104,14 @@ async function setupQueues() {
       },
     });
 
+    await channel.assertQueue(QUEUES.OTP_REQUESTS, {
+      durable: true,
+      arguments: {
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": QUEUES.DEAD_LETTER,
+      },
+    });
+
     // Notification queue
     await channel.assertQueue(QUEUES.NOTIFICATIONS, {
         durable: true
@@ -105,6 +121,7 @@ async function setupQueues() {
     await channel.bindQueue(QUEUES.TEXT_EXTRACTION, EXCHANGES.PROCESSING, 'text.extraction');
     await channel.bindQueue(QUEUES.EMBEDDING_GENERATION, EXCHANGES.PROCESSING, 'embedding.generation');
     await channel.bindQueue(QUEUES.DOCUMENT_ANALYSIS, EXCHANGES.PROCESSING, 'document.analysis');
+    // await channel.bindQueue(QUEUES.OTP_REQUESTS, EXCHANGES.OTP, "otp.request");
     await channel.bindQueue(QUEUES.NOTIFICATIONS, EXCHANGES.NOTIFICATIONS, '');
 
     logger.info('RabbitMQ queues configured successfully!');
@@ -184,6 +201,19 @@ class MessagePublisher{
         return await this.publishToExchange(EXCHANGES.NOTIFICATIONS, '', notification);
     }
 
+    static async publishOtpRequest(contactMethod, contact, otp){
+      const job = {
+        id: `otp_${contact}_${Date.now()}`,
+        contactMethod,
+        contact,
+        otp,
+        timestamp: new Date().toISOString(),
+        attempts: 0
+      };
+
+      return await this.publishToQueue(QUEUES.OTP_REQUESTS, job);
+    }
+
     static async publishToQueue(queueName, message){
         try {
             const messageBuffer = Buffer.from(JSON.stringify(message));
@@ -260,6 +290,11 @@ class MessageConsumer {
       processingCallback
     );
   }
+
+  static async consumeOtpRequests(){
+    return await this.consumeFromQueue(QUEUES.OTP_REQUESTS, processingCallback);
+  }
+
 
   static async consumeFromQueue(queueName, processingCallback){
     try {

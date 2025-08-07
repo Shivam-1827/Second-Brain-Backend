@@ -189,6 +189,49 @@ class AuthController {
       });
     }
   }
+
+  async otpRequest(req, res)  {
+    try {
+      const {contactMethod, contact} = req.body;
+
+      await authService.otpRequest(contactMethod, contact);
+
+      res.json({
+        success: true,
+        message: "OTP request published successfully"
+      });
+    } catch (error) {
+      logger.error("OTP generation failed", error);
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      })
+    }
+  }
+
+  
+
+  async otpVerify(req, res) {
+    try {
+      const {contactMethod, contact, otp} = req.body;
+
+      await authService.otpVerify(contactMethod, contact, otp);
+
+      res.status(200).json({
+        success: true,
+        message: "OTP verified successfully!"
+      });
+
+      logger.info("OTP verified successfully");
+      
+    } catch (error) {
+      logger.error("OTP  generator failed", error);
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      })
+    }
+  }
 }
 
 module.exports = new AuthController();

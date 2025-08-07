@@ -1,5 +1,6 @@
-const { zod } = require("zod");
+const { z, ZodError } = require("zod");
 const logger = require("../utils/logger");
+const { refreshToken } = require("../services/authService");
 
 class ValidatorMiddleware {
   // generic validation middleware
@@ -12,7 +13,7 @@ class ValidatorMiddleware {
         req[source] = parsed;
         next();
       } catch (err) {
-        if (err instanceof zod.ZodError) {
+        if (err instanceof ZodError) {
           const errorMessages = err.errors.map((detail) => ({
             field: detail.path.join("."),
             message: detail.message,
@@ -37,60 +38,135 @@ class ValidatorMiddleware {
     };
   }
 
-  //   registration validation
   static validUserRegistration() {
-    const schema = zod.object({
-      email: zod.string().email("Please provide a valid email address"),
-      password: zod
+    const schema = z.object({
+      email: z.string().email("Please provide a valid email address"),
+      password: z
         .string()
         .min(8, "Password must be at least 8 characters long")
         .regex(
           /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/,
-          "Password must containat least one uppercase letter, one lowercase letter, one numer and one special character"
+          "Password must contain at least one uppercase letter, one lowercase letter, one number and one special character"
         ),
-      first_name: zod
+      firstName: z
         .string()
-        .min(2, "First name must be atleast 2 character long")
+        .min(2, "First name must be at least 2 characters long")
         .max(50, "First name cannot exceed more than 50 characters"),
-      last_name: zod
+      lastName: z
         .string()
-        .min(2, "last name must be atleast 2 character long")
-        .max(50, "last name cannot exceed more than 50 characters"),
+        .min(2, "Last name must be at least 2 characters long")
+        .max(50, "Last name cannot exceed more than 50 characters"),
     });
 
     return this.validate(schema);
   }
-
-  //   Login
 
   static validateUserLogin() {
-    const schema = zod.object({
-      email: zod.string().email("Please provide a valid email address"),
-      password: zod.string().min(1, "Password is required"),
+    const schema = z.object({
+      email: z.string().email("Please provide a valid email address"),
+      password: z.string().min(1, "Password is required"),
     });
 
     return this.validate(schema);
   }
 
-  // asset upload validate
+  static validateForgotPassword() {
+    const schema = z.object({
+      email: z.string().email("Please provide a valid email address"),
+    });
+    return ValidatorMiddleware.validate(schema);
+  }
+
+  static validateResetPassword() {
+    const schema = z.object({
+      token: z.string().min(1, "Reset token is required"),
+      newPassword: z
+        .string()
+        .min(8, "New password must be at least 8 characters long")
+        .regex(
+          /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/,
+          "New password must contain at least one uppercase letter, one lowercase letter, one number, and one special character"
+        ),
+    });
+    return ValidatorMiddleware.validate(schema);
+  }
+
+  static validateOTPRequest() {
+    const schema = z
+      .object({
+        contactMethod: z.string(),
+        email: z.string().email().optional(),
+        phone: z
+          .string()
+          .regex(
+            /^\+\d{1,3}\d{7,14}$/,
+            "Phone must be 10 digit long and must include country code (e.g. +919876543210) "
+          )
+          .optional(),
+      })
+      .refine((data) => data.email || data.phone, {
+        message: "Either email or phone is required",
+      });
+
+    return ValidatorMiddleware.validate(schema);
+  }
+
+  static validateOTPVerify() {
+    const schema = z
+      .object({
+        contactMethod: z.string(),
+        email: z.string().email().optional(),
+        phone: z
+          .string()
+          .regex(
+            /^\+\d{1,3}\d{7,14}$/,
+            "Phone must be 10 digit long and must include country code (e.g. +919876543210) "
+          )
+          .optional(),
+        otp: z
+          .string()
+          .length(6, "OTP must be exactly 6 digits")
+          .regex(/^\d{6}$/, "OTP must be numeric"),
+      })
+      .refine((data) => data.email || data.phone, {
+        message: "Either email or phone is required",
+      });
+
+    return ValidatorMiddleware.validate(schema);
+  }
+
+  static validateChangePassword() {
+    const schema = z.object({
+      currentPassword: z.string().min(1, "Current password is required"),
+      newPassword: z
+        .string()
+        .min(8, "New password must be at least 8 characters long")
+        .regex(
+          /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])/,
+          "New password must contain at least one uppercase letter, one lowercase letter, one number, and one special character"
+        ),
+    });
+    return ValidatorMiddleware.validate(schema);
+  }
+
   static validateAssetUpload() {
-    const schema = zod.object({
-      title: zod
+    const schema = z.object({
+      title: z
         .string()
         .min(1, "Title cannot be empty")
         .max(200, "Title cannot exceed more than 200 characters"),
-      type: zod.enum(["document", "video", "image", "article", "tweet"], {
+      type: z.enum(["document", "video", "image", "article", "tweet"], {
         errorMap: () => ({
           message:
             "Type must be one of: document, video, image, article, tweet",
         }),
       }),
-      url: zod.string().url("Please provide a valid URL").optional(),
-      tags: zod
-        .array(zod.string().min(1).max(50))
+      url: z.string().url("Please provide a valid URL").optional(),
+      tags: z
+        .array(z.string().min(1).max(50))
         .max(10, "Maximum 10 tags allowed")
         .optional(),
-      metadata: zod.record(zod.any()).optional(),
+      metadata: z.record(z.any()).optional(),
     });
 
     return this.validate(schema);
@@ -136,7 +212,6 @@ class ValidatorMiddleware {
     return this.validate(schema);
   }
 
-  // Pagination
   static validatePagination() {
     const schema = z.object({
       page: z.coerce.number().int().min(1).default(1),
@@ -148,7 +223,6 @@ class ValidatorMiddleware {
     return this.validate(schema, "query");
   }
 
-  // UUID Param Validation
   static validateUUID(paramName = "id") {
     const schema = z.object({
       [paramName]: z.string().uuid(`Invalid ${paramName} format`),
@@ -157,7 +231,6 @@ class ValidatorMiddleware {
     return this.validate(schema, "params");
   }
 
-  // Asset Update
   static validateAssetUpdate() {
     const schema = z.object({
       title: z
@@ -175,7 +248,6 @@ class ValidatorMiddleware {
     return this.validate(schema);
   }
 
-  // File Upload Validation
   static validateFileUpload(allowedTypes = [], maxSize = 10 * 1024 * 1024) {
     return (req, res, next) => {
       if (!req.file) {
@@ -206,7 +278,43 @@ class ValidatorMiddleware {
     };
   }
 
-  // Custom zod validation
+  static validateRefreshToken(req, res, next) {
+    const refreshTokenSchema = z.object({
+      refreshToken: z.string().min(1, "Refresh token is required!"),
+    });
+
+    try {
+      const parsed = refreshTokenSchema.parse(req.body);
+      req.body.refreshToken = parsed.refreshToken;
+      next();
+    } catch (error) {
+      if (error instanceof ZodError) {
+        const errorMessages = error.errors.map((detail) => ({
+          // Fixed this line
+          field: detail.path.join("."),
+          message: detail.message,
+        }));
+
+        logger.warn("Refresh token validation failed: ", {
+          errors: errorMessages,
+          ip: req.ip,
+          user: req.user?.id,
+        });
+
+        return res.status(400).json({
+          success: false,
+          message: "Validation failed",
+          details: errorMessages,
+        });
+      }
+
+      logger.error("Unexpected refresh token validation error: ", error);
+      return res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
   static validateCustom(asyncValidationFn) {
     return async (req, res, next) => {
       try {
@@ -221,12 +329,11 @@ class ValidatorMiddleware {
         }
         next();
       } catch (error) {
-        logger.error("Custom validation error: ", err);
+        logger.error("Custom validation error: ", error);
         return res.status(500).json({ error: "Validation failed" });
       }
     };
   }
 }
-
 
 module.exports = ValidatorMiddleware;

@@ -9,6 +9,7 @@ const errorHandler = require("./middleware/errorHandler");
 
 // Import routes
 const authRoutes = require("./routes/auth");
+const assetRoutes = require('./routes/assets');
 
 // Import database
 const { PrismaClient } = require("@prisma/client");
@@ -29,6 +30,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // API routes
 app.use("/api/auth", authRoutes);
+app.use("/api/assets", assetRoutes);
 
 // Graceful shutdown
 
